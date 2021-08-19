@@ -2874,7 +2874,7 @@ public class StatusBar extends SystemUI implements DemoMode,
     }
 
     public void haltLyricTicker() {
-        if (mLyricTicker != null && mLyricEnabled) {
+        if (mLyricTicker != null) {
             mLyricTicker.halt();
         }
     }
@@ -5248,6 +5248,9 @@ public class StatusBar extends SystemUI implements DemoMode,
                 if (hasNavbar) {
                     mNavigationBarController.onDisplayRemoved(mDisplayId);
                 }
+            }
+            if (mLyricEnabled == false) {
+                haltLyricTicker();
             }
         } else if (STATUS_BAR_TICKER_ANIMATION_MODE.equals(key)) {
             mTickerAnimationMode =
