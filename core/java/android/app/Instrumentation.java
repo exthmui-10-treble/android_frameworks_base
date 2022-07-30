@@ -41,6 +41,7 @@ import android.os.Process;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.os.SystemClock;
+import android.os.SystemProperties;
 import android.os.TestLooperManager;
 import android.os.UserHandle;
 import android.util.AndroidRuntimeException;
@@ -62,6 +63,8 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.List;
+
+import com.android.internal.util.exthmui.MeizuPropsUtils;
 
 /**
  * Base class for implementing application instrumentation code.  When running
@@ -89,6 +92,8 @@ public class Instrumentation {
     public static final String REPORT_KEY_STREAMRESULT = "stream";
 
     private static final String TAG = "Instrumentation";
+
+    private static final String DISGUISE_PROPS_FOR_MUSIC_APP = "persist.sys.disguise_props_for_music_app";
 
     /**
      * @hide
@@ -1154,6 +1159,10 @@ public class Instrumentation {
         Application app = getFactory(context.getPackageName())
                 .instantiateApplication(cl, className);
         app.attach(context);
+        if (SystemProperties.getBoolean(DISGUISE_PROPS_FOR_MUSIC_APP, false)) {
+            String packageName = app.getPackageName();
+            MeizuPropsUtils.setProps(packageName);
+        }
         return app;
     }
     
@@ -1171,6 +1180,10 @@ public class Instrumentation {
             ClassNotFoundException {
         Application app = (Application)clazz.newInstance();
         app.attach(context);
+        if (SystemProperties.getBoolean(DISGUISE_PROPS_FOR_MUSIC_APP, false)) {
+            String packageName = app.getPackageName();
+            MeizuPropsUtils.setProps(packageName);
+        }
         return app;
     }
 
