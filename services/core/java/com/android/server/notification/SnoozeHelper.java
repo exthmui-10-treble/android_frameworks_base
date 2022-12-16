@@ -36,6 +36,7 @@ import android.util.Slog;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.logging.MetricsLogger;
 import com.android.internal.logging.nano.MetricsProto;
+import com.android.server.pm.PackageManagerService;
 
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
@@ -56,6 +57,8 @@ import java.util.Set;
  * NotificationManagerService helper for handling snoozed notifications.
  */
 public class SnoozeHelper {
+    static final int CONCURRENT_SNOOZE_LIMIT = 500;
+
     private static final String TAG = "SnoozeHelper";
     private static final boolean DEBUG = Log.isLoggable(TAG, Log.DEBUG);
     private static final String INDENT = "    ";
@@ -88,6 +91,13 @@ public class SnoozeHelper {
         mAm = (AlarmManager) mContext.getSystemService(Context.ALARM_SERVICE);
         mCallback = callback;
         mUserProfiles = userProfiles;
+    }
+
+    protected boolean canSnooze(int numberToSnooze) {
+        if ((mPackages.size() + numberToSnooze) > CONCURRENT_SNOOZE_LIMIT) {
+            return false;
+        }
+        return true;
     }
 
     protected boolean isSnoozed(int userId, String pkg, String key) {
@@ -330,6 +340,7 @@ public class SnoozeHelper {
         return PendingIntent.getBroadcast(mContext,
                 REQUEST_CODE_REPOST,
                 new Intent(REPOST_ACTION)
+                        .setPackage(PackageManagerService.PLATFORM_PACKAGE_NAME)
                         .setData(new Uri.Builder().scheme(REPOST_SCHEME).appendPath(key).build())
                         .addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
                         .putExtra(EXTRA_KEY, key)

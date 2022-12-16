@@ -15,6 +15,8 @@
  */
 package com.android.server.notification;
 
+import static com.android.server.notification.SnoozeHelper.CONCURRENT_SNOOZE_LIMIT;
+
 import static junit.framework.Assert.assertEquals;
 import static junit.framework.Assert.assertFalse;
 import static junit.framework.Assert.assertTrue;
@@ -41,6 +43,7 @@ import android.util.IntArray;
 import androidx.test.runner.AndroidJUnit4;
 
 import com.android.server.UiServiceTestCase;
+import com.android.server.pm.PackageManagerService;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -82,6 +85,17 @@ public class SnoozeHelperTest extends UiServiceTestCase {
     }
 
     @Test
+    public void testSnoozeSentToAndroid() throws Exception {
+        NotificationRecord r = getNotificationRecord("pkg", 1, "one", UserHandle.SYSTEM);
+        mSnoozeHelper.snooze(r, 1000);
+        ArgumentCaptor<PendingIntent> captor = ArgumentCaptor.forClass(PendingIntent.class);
+        verify(mAm, times(1)).setExactAndAllowWhileIdle(
+                anyInt(), anyLong(), captor.capture());
+        assertEquals(PackageManagerService.PLATFORM_PACKAGE_NAME,
+                captor.getValue().getIntent().getPackage());
+    }
+
+    @Test
     public void testSnooze() throws Exception {
         NotificationRecord r = getNotificationRecord("pkg", 1, "one", UserHandle.SYSTEM);
         mSnoozeHelper.snooze(r);
@@ -89,6 +103,22 @@ public class SnoozeHelperTest extends UiServiceTestCase {
                 anyInt(), anyLong(), any(PendingIntent.class));
         assertTrue(mSnoozeHelper.isSnoozed(
                 UserHandle.USER_SYSTEM, r.sbn.getPackageName(), r.getKey()));
+    }
+
+    @Test
+    public void testSnoozeLimit() {
+        for (int i = 0; i < CONCURRENT_SNOOZE_LIMIT; i++ ) {
+            NotificationRecord r = getNotificationRecord("pkg", i, i+"", UserHandle.SYSTEM);
+
+            assertTrue("cannot snooze record " + i, mSnoozeHelper.canSnooze(1));
+
+            if (i % 2 == 0) {
+                mSnoozeHelper.snooze(r, 1000);
+            } else {
+                mSnoozeHelper.snooze(r, 9000);
+            }
+        }
+        assertFalse(mSnoozeHelper.canSnooze(1));
     }
 
     @Test

@@ -150,6 +150,9 @@ public class PermissionManagerService {
     private static final int USER_PERMISSION_FLAGS = FLAG_PERMISSION_USER_SET
             | FLAG_PERMISSION_USER_FIXED;
 
+    /** All storage permissions */
+    private static final List<String> STORAGE_PERMISSIONS = new ArrayList<>();
+
     /** If the permission of the value is granted, so is the key */
     private static final Map<String, String> FULLER_PERMISSION_MAP = new HashMap<>();
 
@@ -158,6 +161,9 @@ public class PermissionManagerService {
                 Manifest.permission.ACCESS_FINE_LOCATION);
         FULLER_PERMISSION_MAP.put(Manifest.permission.INTERACT_ACROSS_USERS,
                 Manifest.permission.INTERACT_ACROSS_USERS_FULL);
+        STORAGE_PERMISSIONS.add(Manifest.permission.READ_EXTERNAL_STORAGE);
+        STORAGE_PERMISSIONS.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+        STORAGE_PERMISSIONS.add(Manifest.permission.ACCESS_MEDIA_LOCATION);
     }
 
     /** Lock to protect internal data access */
@@ -587,6 +593,57 @@ public class PermissionManagerService {
             return protectionLevel;
         }
         return protectionLevel;
+    }
+
+    /**
+     * If the app is updated, and has scoped storage permissions, then it is possible that the
+     * app updated in an attempt to get unscoped storage. If so, revoke all storage permissions.
+     * @param newPackage The new package that was installed
+     * @param oldPackage The old package that was updated
+     */
+    private void revokeStoragePermissionsIfScopeExpanded(
+            @NonNull PackageParser.Package newPackage,
+            @NonNull PackageParser.Package oldPackage,
+            @NonNull PermissionCallback permissionCallback) {
+        boolean downgradedSdk = oldPackage.applicationInfo.targetSdkVersion >= Build.VERSION_CODES.Q
+                && newPackage.applicationInfo.targetSdkVersion < Build.VERSION_CODES.Q;
+        boolean upgradedSdk = oldPackage.applicationInfo.targetSdkVersion < Build.VERSION_CODES.Q
+                && newPackage.applicationInfo.targetSdkVersion >= Build.VERSION_CODES.Q;
+        boolean newlyRequestsLegacy = !upgradedSdk
+                && !oldPackage.applicationInfo.hasRequestedLegacyExternalStorage()
+                && newPackage.applicationInfo.hasRequestedLegacyExternalStorage();
+
+        if (!newlyRequestsLegacy && !downgradedSdk) {
+            return;
+        }
+
+        final int callingUid = Binder.getCallingUid();
+
+        for (int userId: mUserManagerInt.getUserIds()) {
+            int numRequestedPermissions = newPackage.requestedPermissions.size();
+            for (int i = 0; i < numRequestedPermissions; i++) {
+                PermissionInfo permInfo = getPermissionInfo(newPackage.requestedPermissions.get(i),
+                        newPackage.packageName, 0, callingUid);
+                if (permInfo == null || !STORAGE_PERMISSIONS.contains(permInfo.name)) {
+                    continue;
+                }
+
+                EventLog.writeEvent(0x534e4554, "171430330", newPackage.applicationInfo.uid,
+                        "Revoking permission " + permInfo.name + " from package "
+                                + newPackage.packageName + " as either the sdk downgraded "
+                                + downgradedSdk + " or newly requested legacy full storage "
+                                + newlyRequestsLegacy);
+
+                try {
+                    revokeRuntimePermission(permInfo.name, newPackage.packageName,
+                            false, userId, permissionCallback);
+                } catch (IllegalStateException | SecurityException e) {
+                    Log.e(TAG, "unable to revoke " + permInfo.name + " for "
+                            + newPackage.packageName + " user " + userId, e);
+                }
+            }
+        }
+
     }
 
     /**
@@ -1039,23 +1096,29 @@ public class PermissionManagerService {
                         // or has updated its target SDK and AR is no longer implicit to it.
                         // This is a compatibility workaround for apps when AR permission was
                         // split in Q.
-                        final List<PermissionManager.SplitPermissionInfo> permissionList =
-                                getSplitPermissions();
-                        int numSplitPerms = permissionList.size();
-                        for (int splitPermNum = 0; splitPermNum < numSplitPerms; splitPermNum++) {
-                            PermissionManager.SplitPermissionInfo sp =
-                                    permissionList.get(splitPermNum);
-                            String splitPermName = sp.getSplitPermission();
-                            if (sp.getNewPermissions().contains(permName)
-                                    && origPermissions.hasInstallPermission(splitPermName)) {
-                                upgradedActivityRecognitionPermission = splitPermName;
-                                newImplicitPermissions.add(permName);
+                        // b/210065877: Check that the installed version is pre Q to auto-grant in
+                        // case of OS update
+                        if (mPackageManagerInt.getInstalledSdkVersion(pkg)
+                                < Build.VERSION_CODES.Q) {
+                            final List<PermissionManager.SplitPermissionInfo> permissionList =
+                                    getSplitPermissions();
+                            int numSplitPerms = permissionList.size();
+                            for (int splitPermNum = 0; splitPermNum < numSplitPerms;
+                                    splitPermNum++) {
+                                PermissionManager.SplitPermissionInfo sp =
+                                        permissionList.get(splitPermNum);
+                                String splitPermName = sp.getSplitPermission();
+                                if (sp.getNewPermissions().contains(permName)
+                                        && origPermissions.hasInstallPermission(splitPermName)) {
+                                    upgradedActivityRecognitionPermission = splitPermName;
+                                    newImplicitPermissions.add(permName);
 
-                                if (DEBUG_PERMISSIONS) {
-                                    Slog.i(TAG, permName + " is newly added for "
-                                            + pkg.packageName);
+                                    if (DEBUG_PERMISSIONS) {
+                                        Slog.i(TAG, permName + " is newly added for "
+                                                + pkg.packageName);
+                                    }
+                                    break;
                                 }
-                                break;
                             }
                         }
                     }
@@ -3119,6 +3182,21 @@ public class PermissionManagerService {
         public boolean isPermissionsReviewRequired(@NonNull Package pkg, @UserIdInt int userId) {
             return PermissionManagerService.this.isPermissionsReviewRequired(pkg, userId);
         }
+
+        /**
+         * If the app is updated, and has scoped storage permissions, then it is possible that the
+         * app updated in an attempt to get unscoped storage. If so, revoke all storage permissions.
+         * @param newPackage The new package that was installed
+         * @param oldPackage The old package that was updated
+         */
+        public void revokeStoragePermissionsIfScopeExpanded(
+                @NonNull PackageParser.Package newPackage,
+                @NonNull PackageParser.Package oldPackage,
+                @NonNull PermissionCallback permissionCallback) {
+            PermissionManagerService.this.revokeStoragePermissionsIfScopeExpanded(newPackage,
+                    oldPackage, permissionCallback);
+        }
+
         @Override
         public void revokeRuntimePermissionsIfGroupChanged(
                 @NonNull PackageParser.Package newPackage,
