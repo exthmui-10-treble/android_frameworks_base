@@ -2411,4 +2411,10 @@ enum PageId {
     // CATEGORY: SETTINGS
     // OS: Q
     SETTINGS_GESTURE_TAP = 1751;
+
+    // exTHmUI addons
+
+    // OPEN: Settings > exTHmUISettings > Status bar lyric > Enable status bar lyric
+    // CATEGORY: SETTINGS
+    STATUS_BAR_LYRIC = 3000;
 }
